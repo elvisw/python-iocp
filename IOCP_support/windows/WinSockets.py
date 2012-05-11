@@ -137,7 +137,7 @@ class _Winsock(object):
 
 def accept(self):
     """
-    Perform accept on a socket, because windows is a faggot!
+    Perform accept on a socket, if using iocp use windows magics
     """
     if self.using_iocp:
         self._winsockets.perform_wait_event()

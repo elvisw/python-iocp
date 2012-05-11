@@ -160,10 +160,11 @@ if testing:
     s.bind(("",1234))   
     s.listen(1)
     iocp.register(s)
-    print "please connect in localhost:1234 cuz i'm waiting, niggar "
+    print "please connect in localhost:1234"
     n = iocp.poll()
     b = n.accept()
     print b        
     v, _ = b
-    v.send("oi")
+    print "i sent hi, checkout your socket if you received."
+    v.send("hi")
             
