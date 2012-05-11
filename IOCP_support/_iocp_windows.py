@@ -101,10 +101,8 @@ class IOCP(object):
                 return None
             
     def poll(self, timeout=None, _last_event=False):
-        evt = self._poll(timeout)
         if not self._pending_events:
-            if evt:
-                self._pending_events.append(self._poll(timeout))
+            self._pending_events.append(self._poll(timeout))
         try:
             if not _last_event:
                 return self._pending_events[0]
@@ -134,9 +132,11 @@ class IOCP(object):
             while 1:
                 if self.poll(_last_event=True) == fd:
                     self._pending_events.pop()
-                    return
+                    return True
         if timeout:
-            if self.poll(timeout, True) == fd:
+            evt = self.poll(timeout, True)
+            if evt == fd:
+                self._pending_events.pop()
                 return True
             return False
         

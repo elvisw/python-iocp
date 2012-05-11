@@ -25,12 +25,11 @@ import os
 assert os.name == 'nt'
 from types import MethodType
 
-import socket as __socket
+import socket as _socket
 from socket import socket
 
-slots = [i for i in socket.__slots__] + ['using_iocp', '_winsockets']
-
-from .winfile_api import AllocateBuffer, OVERLAPPED, AcceptEx, SO_UPDATE_ACCEPT_CONTEXT
+from .winfile_api import AllocateBuffer, OVERLAPPED, GetAcceptExSockaddrs,\
+                         AcceptEx, SO_UPDATE_ACCEPT_CONTEXT, WSASocket
 
 
 import struct
@@ -72,7 +71,7 @@ class _Winsock(object):
     __slots__ = ['using_iocp', 'iocp', 'listening', 'listening_n', 'acceptors',
                  'MAX_CACHED_SOCKETS', 'socket', 'max_cached_sockets_n',
                  'patch_after_registering', '__name__','__doc__']
-    MAX_CACHED_SOCKETS = [128] #max number of pre-accepted sockets
+    MAX_CACHED_SOCKETS = [1] #max number of pre-accepted sockets
     def __init__(self, socket):
         
         self.patch_after_registering = [recv]
@@ -90,17 +89,19 @@ class _Winsock(object):
         return self_socket._sock.recvfrom_into(*args, **kw)
     
     def perform_accept_ex_addrs(self):
-        s1, buf = self.acceptors.pop(0)
+        s1, buf, ol = self.acceptors.pop()
+        print s1
         s1.setsockopt(
-            socket.SOL_SOCKET,
+            _socket.SOL_SOCKET,
             SO_UPDATE_ACCEPT_CONTEXT,
             struct.pack("I", self.socket.fileno())
         )
         #TODO
-        #GetAcceptExSockaddrs(self.socket, buff)
+        GetAcceptExSockaddrs(self.socket, buf)
         
         #checking if the cache is null, if, repopulate cache
         self.perform_accept_ex()
+        s1 = socket(_sock=s1)
         return (s1, s1.getpeername())
 
     
@@ -108,24 +109,33 @@ class _Winsock(object):
         """
         maintain a cache of preallocated sockets for faster accepting sockets
         """
-        
+
+         
+        if self.listening_n == 0:
+            self.listening_n = self.MAX_CACHED_SOCKETS[0]
         if not self.max_cached_sockets_n:
             if self.listening_n > self.MAX_CACHED_SOCKETS[0]:
                 self.max_cached_sockets_n = self.MAX_CACHED_SOCKETS[0]
             else:
                 self.max_cached_sockets_n = self.listening_n
-        if not self.acceptors:      
+        if not self.acceptors:
+            print "performing acceptors"
             while len(self.acceptors) < self.max_cached_sockets_n:
-                
-                buff = AllocateBuffer(64)
+                s = self.socket
+                print "creating acceptor,",
+                #s1 = WSASocket(s.family, s.type)
+                s1 = _socket._realsocket(s.family, s.type)
+                buff = AllocateBuffer(128)
                 overlapped = OVERLAPPED()
-                s1 = socket()
-                AcceptEx(self.socket, s1, buff, overlapped)
-                self.acceptors.append((s1,buff))
+                AcceptEx(s.fileno(), s1.fileno(), buff, overlapped )
+                self.acceptors.append((s1,buff, overlapped))
+             
+                
                 
     def perform_wait_event(self):
         timeout = self.socket.gettimeout()
-        self.iocp._wait_event(self.socket, timeout)
+        print timeout
+        print self.iocp._wait_event(self.socket, timeout)
             
 
     def unregister_iocp(self):
@@ -140,8 +150,9 @@ def accept(self):
     Perform accept on a socket, if using iocp use windows magics
     """
     if self.using_iocp:
+        print "waiting event"
         self._winsockets.perform_wait_event()
-        r = self._winsockets.perform_accept_ex_addrs(self)
+        r = self._winsockets.perform_accept_ex_addrs()
         return r
     else:
         return self._sock_accept()
@@ -163,4 +174,3 @@ def recv(self, value):
 socket.accept = MethodType(accept, None, socket)
 socket.listen = MethodType(listen, None, socket)
 #socket.recv = MethodType(recv, None, socket)
-socket.__slots__ = slots

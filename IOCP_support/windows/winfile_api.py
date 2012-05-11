@@ -15,8 +15,8 @@ _ports_created = {}
 
 import sys 
 assert 'win32' in sys.platform
-
-from ctypes import WINFUNCTYPE, GetLastError, windll, pythonapi, cast
+from socket import IPPROTO_TCP, IPPROTO_UDP, AF_INET, SOCK_STREAM
+from ctypes import WINFUNCTYPE, GetLastError, windll, pythonapi, cast, c_buffer
 from ctypes import create_string_buffer, c_ushort, c_ubyte, c_char, c_short,\
                    c_int, c_uint, c_ulong, c_long, c_void_p, byref, c_char_p,\
                    Structure, Union, py_object, POINTER, pointer, sizeof,\
@@ -32,7 +32,7 @@ import socket
 from .consts import *
 
 NULL =  c_ulong()
-SOCKET = SIZE_T = c_uint
+GROUP = SOCKET = SIZE_T = c_uint
 LPDWORD = POINTER(DWORD)
 PULONG_PTR = POINTER(c_ulong)
 
@@ -90,6 +90,8 @@ WSAID_TRANSMITFILE = GUID(0xb5367df0,0xcbac,0x11cf,0x95,
 
 MAX_PROTOCOL_CHAIN = 7
 WSAPROTOCOL_LEN = 255
+
+
 
 class WSAPROTOCOLCHAIN(Structure):
     _fields_ = [
@@ -188,6 +190,19 @@ def _bool_error_check(result, func, args):
     if not result:
         return GetLastError()
     return 0
+
+lowWSASocket = windll.ws2_32.WSASocketA
+lowWSASocket.argtypes = (c_int, c_int, c_int, POINTER(WSAPROTOCOL_INFO),
+                         GROUP, DWORD )
+lowWSASocket.restype = SOCKET
+
+def WSASocket(family=AF_INET, type=SOCK_STREAM, flags=WSA_FLAG_OVERLAPPED):
+    proto = {
+             SOCK_STREAM: IPPROTO_TCP,
+             SOCK_DGRAM: IPPROTO_UDP
+             }
+    return lowWSASocket(family, type, NULL, 0, flags)
+    
   
 lowCreateIoCompletionPort = windll.kernel32.CreateIoCompletionPort
 lowCreateIoCompletionPort.argtypes = (HANDLE, HANDLE, c_ulong, DWORD)
@@ -275,8 +290,8 @@ WSASend.argtypes = (SOCKET, POINTER(WSABUF), DWORD, POINTER(DWORD),
                      DWORD, POINTER(OVERLAPPED), c_void_p)
 WSASend.restype = c_int
 WSASend.errcheck = _error_check
-  
-lowAcceptEx = windll.Mswsock.AcceptEx
+
+
 """
 BOOL AcceptEx(
   __in   SOCKET sListenSocket,
@@ -289,6 +304,7 @@ BOOL AcceptEx(
   __in   LPOVERLAPPED lpOverlapped
 );
 """
+lowAcceptEx = windll.Mswsock.AcceptEx
 lowAcceptEx.argtypes = (SOCKET, SOCKET, c_void_p, DWORD, DWORD, DWORD,
                       POINTER(DWORD), POINTER(OVERLAPPED))
 lowAcceptEx.restype = BOOL
@@ -297,8 +313,7 @@ lowAcceptEx.errcheck = _bool_error_check
 """
 Added Function to looks like win32file function 
 """
-
-def AcceptEx(sListening, sAccepting, buffer, ol):
+def AcceptEx(sListening, sAccepting, buff, ol):
     tLis = type(sListening)
     tAcc = type(sAccepting)
     if tLis == socket.socket:
@@ -323,15 +338,14 @@ def AcceptEx(sListening, sAccepting, buffer, ol):
     getsockopt(fdLis, SOL_SOCKET, SO_PROTOCOL_INFOA,
                 cast(byref(prot_info), c_char_p),
                 byref(prot_info_len))
-                
-    
-    return bool(lowAcceptEx(fdLis, fdAcc,
-                    cast(buffer, c_void_p),
+    #print fdLis, fdAcc, buffer, prot_info.iMaxSockAddr + 16, nbytes, ol
+    r = lowAcceptEx(fdLis, fdAcc, cast(buff, c_void_p),  0,
                     0,
                     prot_info.iMaxSockAddr + 16,
-                    prot_info.iMaxSockAddr + 16,
                     nbytes,
-                    pointer(ol)))
+                    pointer(ol))
+    print r
+    return r
 
   
 lowGetAcceptExSockaddrs = windll.Mswsock.GetAcceptExSockaddrs
@@ -451,7 +465,7 @@ _get_osfhandle.restype = c_long
   
 pythonapi.PyBuffer_New.argtypes = (c_ulong,)
 pythonapi.PyBuffer_New.restype = py_object
-AllocateBuffer = lambda n: create_string_buffer(n) 
+AllocateBuffer = c_buffer 
   
 pythonapi.PyErr_SetFromErrno.argtypes = (py_object,)
 pythonapi.PyErr_SetFromErrno.restype = py_object
@@ -477,7 +491,7 @@ if testing:
                           struct.pack("I", s.fileno())
                           )
             assert ck == 15 , 'invalid ck'
-            return (rc, nb, ck, ol),s1
+            return (rc, nb, ck, ol),s1, s
         
         buff = AllocateBuffer(64)
         overlapped = OVERLAPPED()
