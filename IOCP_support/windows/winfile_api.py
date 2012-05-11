@@ -11,7 +11,7 @@ some functions was implemented by me for compatibility with win32file (win32api 
 @date 2012 may 10
 
 """
-
+_ports_created = {}
 
 import sys 
 assert 'win32' in sys.platform
@@ -190,13 +190,15 @@ def _bool_error_check(result, func, args):
     return 0
   
 lowCreateIoCompletionPort = windll.kernel32.CreateIoCompletionPort
-lowCreateIoCompletionPort.argtypes = (HANDLE, HANDLE, POINTER(c_ulong), DWORD)
+lowCreateIoCompletionPort.argtypes = (HANDLE, HANDLE, c_ulong, DWORD)
 lowCreateIoCompletionPort.restype = HANDLE
 lowCreateIoCompletionPort.errcheck = _bool_error_throw
 def CreateIoCompletionPort(handle, existing, completionKey, numThreads):
-    ck = pointer(c_ulong(completionKey))
-    return lowCreateIoCompletionPort(handle, existing, ck, numThreads )
-    pass
+    if existing == None:
+        existing = 0
+    ck = c_ulong(completionKey)
+    fd =  lowCreateIoCompletionPort(handle, existing, ck, numThreads )
+    return fd
 
 """
 BOOL WINAPI GetQueuedCompletionStatus(
@@ -214,19 +216,21 @@ rc, NumberOfBytesTransferred, CompletionKey, overlapped
   
 lowGetQueuedCompletionStatus = windll.kernel32.GetQueuedCompletionStatus
 lowGetQueuedCompletionStatus.argtypes = (HANDLE, POINTER(DWORD), POINTER(c_ulong), 
-                                      POINTER(POINTER(OVERLAPPED)), DWORD)
+                                      POINTER(LPOVERLAPPED), DWORD)
 lowGetQueuedCompletionStatus.restype = BOOL
 lowGetQueuedCompletionStatus.errcheck = _bool_error_check
 
 def GetQueuedCompletionStatus(hPort, timeOut):
-    overlapped = LPOVERLAPPED()
+    overlapped = pointer(LPOVERLAPPED())
     nob = DWORD()
-    ck = c_ulong
-    rc = lowGetQueuedCompletionStatus(hPort, byref(nob), byref(ck), 
-                                 byref(overlapped))
+    
+    ck = c_ulong()
+    rc = lowGetQueuedCompletionStatus(hPort, pointer(nob), pointer(ck), 
+                                 overlapped, timeOut)
+    #return (rc, nob, ck, overlapped)
     overlapped = overlapped and overlapped.contents
     nob = nob.value
-    ck.value
+    ck = ck.value
     return (rc, nob, ck, overlapped)
     
     
@@ -452,34 +456,40 @@ AllocateBuffer = lambda n: create_string_buffer(n)
 pythonapi.PyErr_SetFromErrno.argtypes = (py_object,)
 pythonapi.PyErr_SetFromErrno.restype = py_object
 
-testing = False
+testing = True 
 
 if testing:
 
     def test():
         print "creating listening socket"
-        s = socket.socket()
+        s = socket.socket(); s1 = socket.socket()
         print "listening on port 1234"
         s.bind(("",1234))
         s.listen(200)
-    
+        hPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE,
+                                      None, 0, 0)
         def accept(s1, buff):
             import struct
+            rc, nb, ck, ol = GetQueuedCompletionStatus(hPort, -1)
             s1.setsockopt(
                           socket.SOL_SOCKET,
                           SO_UPDATE_ACCEPT_CONTEXT,
                           struct.pack("I", s.fileno())
                           )
-            return GetAcceptExSockaddrs(s, buff)
-        out = []
-        for i in xrange(200):
-            buff = AllocateBuffer(64)
-            overlapped = OVERLAPPED()
-            s1 = socket.socket()
-            AcceptEx(s, s1, buff, overlapped )
+            assert ck == 15 , 'invalid ck'
+            return (rc, nb, ck, ol),s1
         
-            out.append((s1, buff, overlapped))
+        buff = AllocateBuffer(64)
+        overlapped = OVERLAPPED()
+        s1 = socket.socket()
+        AcceptEx(s, s1, buff, overlapped )
+        print CreateIoCompletionPort(s.fileno(), hPort, 15, 0) == hPort, hPort
+        
+        
+        #out.append((s1, buff, overlapped))
     
-        return s1, out, accept 
+        print "please connect on port 1234"
+        return accept(s1, buff)
+     
   
   
