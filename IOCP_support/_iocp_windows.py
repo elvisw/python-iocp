@@ -45,7 +45,8 @@ class IOCP(object):
         return self._id
     
     def __init__(self, threads=0):
-        self.iocp = winfile_api.CreateIoCompletionPort(INVALID_HANDLE_VALUE,
+        self.iocp = winfile_api.CreateIoCompletionPort(
+                                            winfile_api.INVALID_HANDLE_VALUE,
                                                     None, 0, 0)
         self._file_descriptors = {}
         self._file_descriptors_key = {}

@@ -20,11 +20,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 __all__ = []
 import sys 
+import os
 
-assert 'win32' in sys.platform
+assert os.name == 'nt'
 from types import MethodType
 
-from socket import * 
+import socket as __socket
+from socket import socket
+
+slots = [i for i in socket.__slots__] + ['using_iocp', '_winsockets']
 
 from .winfile_api import AllocateBuffer, OVERLAPPED, AcceptEx, SO_UPDATE_ACCEPT_CONTEXT
 
@@ -33,10 +37,10 @@ import struct
 
 
 def using_iocp(self):
-    return self._winsocket.using_iocp
+    return self._winsockets.using_iocp
 
 
-def _winsocket(self):
+def _winsockets(self):
     """
     runtime selfpatching
     """
@@ -51,19 +55,27 @@ def _winsocket(self):
         self.recvfrom_into = _Winsock(self)
         self.recvfrom_into.__name__ = __name__
         self.recvfrom_into.__doc__ = __doc__
+        for i in self.recvfrom_into.patch_after_registering:
+            name = i.__name__
+            func = MethodType(i, self, socket)
+            setattr(self, name, func)
         
     return self.recvfrom_into
 
 socket.using_iocp = property(using_iocp)
-socket._winsocket = property(_winsocket)
+socket._winsockets = property(_winsockets)
 socket._sock_recv = socket.recv
 socket._sock_accept = socket.accept
+socket._sock_listen = socket.listen
 
 class _Winsock(object):
     __slots__ = ['using_iocp', 'iocp', 'listening', 'listening_n', 'acceptors',
-                 'MAX_CACHED_SOCKETS', 'socket', 'max_cached_sockets_n']
+                 'MAX_CACHED_SOCKETS', 'socket', 'max_cached_sockets_n',
+                 'patch_after_registering', '__name__','__doc__']
+    MAX_CACHED_SOCKETS = [128] #max number of pre-accepted sockets
     def __init__(self, socket):
-        self.MAX_CACHED_SOCKETS = [128] #max number of pre-accepted sockets
+        
+        self.patch_after_registering = [recv]
         self.max_cached_sockets_n = 0 
         self.using_iocp = False
         self.listening = False
@@ -71,6 +83,8 @@ class _Winsock(object):
         self.acceptors = []
         self.iocp = None
         self.socket = socket
+        self.__name__ = ''
+        self.__doc__ = ''
         
     def __call__(self, self_socket, *args, **kw):
         return self_socket._sock.recvfrom_into(*args, **kw)
@@ -105,7 +119,7 @@ class _Winsock(object):
                 
                 buff = AllocateBuffer(64)
                 overlapped = OVERLAPPED()
-                s1 = socket.socket()
+                s1 = socket()
                 AcceptEx(self.socket, s1, buff, overlapped)
                 self.acceptors.append((s1,buff))
                 
@@ -126,26 +140,27 @@ def accept(self):
     Perform accept on a socket, because windows is a faggot!
     """
     if self.using_iocp:
-        self._winsock.perform_wait_event()
-        r = self._winsock.perform_accept_ex_addrs(self)
-        return (ac, remoteaddr)
+        self._winsockets.perform_wait_event()
+        r = self._winsockets.perform_accept_ex_addrs(self)
+        return r
     else:
-        return self._socket_accept()
+        return self._sock_accept()
 
 def listen(self, value):
-    self._winsock.listening = True
-    self._winsock.listening_n = value
-    r = self._listen(value)
+    self._winsockets.listening = True
+    self._winsockets.listening_n = value
+    r = self._sock_listen(value)
     if self.using_iocp:
-        self._winsock.perform_accept_ex(self)
+        self._winsockets.perform_accept_ex()
     return r
 
 def recv(self, value):
     if self.using_iocp:
-        self._winsock.perform_wait_event()
+        self._winsockets.perform_wait_event()
     return self._sock_recv(value)
 
 
 socket.accept = MethodType(accept, None, socket)
 socket.listen = MethodType(listen, None, socket)
-socket.recv = MethodType(recv, None, socket)
+#socket.recv = MethodType(recv, None, socket)
+socket.__slots__ = slots

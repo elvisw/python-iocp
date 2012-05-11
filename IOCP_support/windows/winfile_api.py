@@ -189,10 +189,15 @@ def _bool_error_check(result, func, args):
         return GetLastError()
     return 0
   
-CreateIoCompletionPort = windll.kernel32.CreateIoCompletionPort
-CreateIoCompletionPort.argtypes = (HANDLE, HANDLE, POINTER(c_ulong), DWORD)
-CreateIoCompletionPort.restype = HANDLE
-CreateIoCompletionPort.errcheck = _bool_error_throw
+lowCreateIoCompletionPort = windll.kernel32.CreateIoCompletionPort
+lowCreateIoCompletionPort.argtypes = (HANDLE, HANDLE, POINTER(c_ulong), DWORD)
+lowCreateIoCompletionPort.restype = HANDLE
+lowCreateIoCompletionPort.errcheck = _bool_error_throw
+def CreateIoCompletionPort(handle, existing, completionKey, numThreads):
+    ck = pointer(c_ulong(completionKey))
+    return lowCreateIoCompletionPort(handle, existing, ck, numThreads )
+    pass
+
 """
 BOOL WINAPI GetQueuedCompletionStatus(
   __in   HANDLE CompletionPort,
